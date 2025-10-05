@@ -647,7 +647,8 @@
          */
         async function processBulkRecords(rawData) {
             if (!isFirebaseReady) {
-                uploadStatus.textContent = 'Database features are disabled in local/offline mode.';
+                // FIX: Update status text to be more explicit about being disabled.
+                uploadStatus.textContent = 'Bulk upload is disabled in local/offline mode.';
                 showMessage('Cannot bulk upload in local mode. Please use the hosted environment.', 'error');
                 return;
             }
@@ -732,6 +733,14 @@
         });
         
         bulkUploadFileBtn.addEventListener('click', async () => {
+            if (!isFirebaseReady) {
+                uploadStatus.textContent = 'Bulk upload is disabled in local/offline mode.';
+                showMessage('Cannot bulk upload in local mode. Please use the hosted environment.', 'error');
+                // We still want the file input to clear, but we prevent reading the file if we can't save it.
+                fileInput.value = '';
+                return;
+            }
+
             const file = fileInput.files[0];
             if (!file) return;
 
@@ -771,6 +780,17 @@
         });
         
         bulkUploadTextBtn.addEventListener('click', async () => {
+            if (!isFirebaseReady) {
+                uploadStatus.textContent = 'Bulk upload is disabled in local/offline mode.';
+                showMessage('Cannot bulk upload in local mode. Please use the hosted environment.', 'error');
+                // Clear the text input to simulate processing without actually saving
+                textInput.value = '';
+                bulkUploadTextBtn.disabled = true;
+                bulkUploadTextBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                bulkUploadTextBtn.classList.add('bg-blue-400', 'cursor-not-allowed');
+                return;
+            }
+            
             const textData = textInput.value.trim();
             if (textData.length === 0) return;
 
