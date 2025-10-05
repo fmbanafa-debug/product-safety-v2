@@ -197,10 +197,29 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase configuration and app ID provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const rawFirebaseConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // --- HARDCODED FIREBASE CONFIGURATION FOR LOCAL TESTING ---
+        // WARNING: This exposes your API key in the client-side code.
+        // Use this only for trusted environments like your private GitHub repo.
+        const APP_ID = 'safety-signal-app-2025'; // A hardcoded App ID
+        const API_KEY = 'AIzaSyD9xRkAan0WhW8GTegveSaU5gaInCO4Yy0'; // Your provided key
+        const PROJECT_ID = 'your-firestore-project-id'; // You MUST replace this with your actual Firestore Project ID!
+        const MESSAGING_SENDER_ID = '123456789012'; // Placeholder, typically not critical for Firestore
+        const STORAGE_BUCKET = 'your-storage-bucket.appspot.com'; // Placeholder, typically not critical for Firestore
+        
+        const LOCAL_FIREBASE_CONFIG = {
+            apiKey: API_KEY,
+            authDomain: `${PROJECT_ID}.firebaseapp.com`,
+            projectId: PROJECT_ID,
+            storageBucket: STORAGE_BUCKET,
+            messagingSenderId: MESSAGING_SENDER_ID,
+            appId: `1:${MESSAGING_SENDER_ID}:web:${Math.random().toString(36).substring(2, 10)}`, // Generate a unique App ID hash
+        };
+
+        // Firebase configuration and app ID are derived either from the hosted environment or the local config.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : APP_ID;
+        const rawFirebaseConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : JSON.stringify(LOCAL_FIREBASE_CONFIG);
+        // We cannot securely generate a custom token locally, so we fall back to anonymous sign-in.
+        const initialAuthToken = null; 
         
         let isFirebaseReady = false;
         let app, db, auth;
@@ -212,12 +231,18 @@
         if (rawFirebaseConfig) {
             try {
                 const firebaseConfig = JSON.parse(rawFirebaseConfig);
+                
+                // IMPORTANT: If you are running this locally, you MUST set your actual Project ID above
+                if (firebaseConfig.projectId === 'your-firestore-project-id') {
+                     throw new Error("Local Mode Setup Warning: You must replace 'your-firestore-project-id' with your actual Firebase project ID to enable database features.");
+                }
+
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 isFirebaseReady = true;
             } catch (e) {
-                console.error("Firebase configuration is present but failed to initialize:", e);
+                console.error("Firebase initialization failed:", e.message || e);
                 // isFirebaseReady remains false
             }
         } else {
@@ -827,12 +852,8 @@
                     setupFirestoreListener();
                 } else {
                     try {
-                        if (initialAuthToken) {
-                            await signInWithCustomToken(auth, initialAuthToken);
-                        } else {
-                            // If no token, sign in anonymously to get a unique User ID
-                            await signInAnonymously(auth);
-                        }
+                        // In local mode, we sign in anonymously since we don't have the custom token.
+                        await signInAnonymously(auth);
                     } catch (error) {
                         console.error("Authentication failed: ", error);
                         userDisplay.textContent = "Authentication failed.";
