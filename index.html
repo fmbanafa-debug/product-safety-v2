@@ -395,6 +395,22 @@
         }
 
         /**
+         * Handles the sorting logic when a header is clicked.
+         * @param {string} column - The column data key to sort by.
+         */
+        function handleSort(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+            // Clear current filter values to avoid unexpected results
+            // Note: Since applyFilters calls sortRecords and renderTable, we only need to call applyFilters
+            applyFilters(); 
+        }
+
+        /**
          * Sorts an array of records based on the current sortColumn and sortDirection.
          * @param {object[]} records - The array of records to sort.
          */
@@ -405,6 +421,7 @@
                 let aValue = a[sortColumn];
                 let bValue = b[sortColumn];
 
+                // Simple string comparison for sorting
                 if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
                 if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
                 return 0;
@@ -705,7 +722,7 @@
         });
 
 
-        // Event listener for sortable headers
+        // Event listener for sortable headers (FIXED)
         tableHeaders.forEach(header => {
             header.addEventListener('click', () => {
                 handleSort(header.dataset.sort);
@@ -731,3 +748,4 @@
     </script>
 </body>
 </html>
+
