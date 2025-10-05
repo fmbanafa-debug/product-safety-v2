@@ -40,7 +40,7 @@
     <div class="container mx-auto p-4 md:p-8">
         <header class="text-center mb-8">
             <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Product Safety Signal Browser</h1>
-            <p class="text-gray-600 mt-2">Filter, add, edit, or delete records from the shared database.</p>
+            <p class="text-gray-600 mt-2">Filter, add, edit, or delete records from your **private** database.</p>
             <div id="user-info" class="text-sm text-gray-500 mt-4">Loading user information...</div>
         </header>
 
@@ -205,6 +205,8 @@
         let isFirebaseReady = false;
         let app, db, auth;
         let currentUserId = null;
+        // Define the base collection name for per-user data
+        const PRIVATE_COLLECTION_NAME = 'safety_signals';
 
         // --- SAFE FIREBASE INITIALIZATION ---
         if (rawFirebaseConfig) {
@@ -256,6 +258,28 @@
         let allRecords = [];
         let sortColumn = null;
         let sortDirection = 'asc';
+
+        /**
+         * Utility function to get the correct collection reference (per-user private collection).
+         * Requires currentUserId to be set.
+         */
+        function getPrivateCollectionRef() {
+            if (!currentUserId) {
+                throw new Error("User ID is not defined for private collection access.");
+            }
+            return collection(db, 'artifacts', appId, 'users', currentUserId, PRIVATE_COLLECTION_NAME);
+        }
+
+        /**
+         * Utility function to get the correct document reference (per-user private collection).
+         * Requires currentUserId and docId to be set.
+         */
+        function getPrivateDocumentRef(docId) {
+            if (!currentUserId) {
+                throw new Error("User ID is not defined for private document access.");
+            }
+            return doc(db, 'artifacts', appId, 'users', currentUserId, PRIVATE_COLLECTION_NAME, docId);
+        }
 
         /**
          * Displays a temporary message box for user feedback.
@@ -486,7 +510,8 @@
                 return;
             }
 
-            const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'safety_signals');
+            // --- CHANGED to use private per-user collection ---
+            const collectionRef = getPrivateCollectionRef();
             
             loadingSpinner.classList.remove('hidden');
 
@@ -516,7 +541,6 @@
             e.preventDefault();
 
             if (!isFirebaseReady) {
-                // FIX: Clear the form to visually indicate "processing" happened, even if save is blocked.
                 showMessage("Database features are disabled in local/offline mode. (Form cleared for UI testing)", 'error');
                 cancelEdit();
                 return;
@@ -535,16 +559,16 @@
             
             try {
                 if (docIdInput.value) {
-                    // Update existing record
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'safety_signals', docIdInput.value);
+                    // Update existing record using private path
+                    const docRef = getPrivateDocumentRef(docIdInput.value);
                     const existingRecord = allRecords.find(r => r.id === docIdInput.value);
                     const newLog = existingRecord.log || [];
                     newLog.push({ action: "Updated", timestamp: new Date() });
                     await updateDoc(docRef, { ...recordData, log: newLog });
                     showMessage("Record updated successfully!");
                 } else {
-                    // Add new record
-                    const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'safety_signals');
+                    // Add new record using private path
+                    const collectionRef = getPrivateCollectionRef();
                     const newLog = [{ action: "Added", timestamp: new Date() }];
                     await addDoc(collectionRef, { ...recordData, log: newLog });
                     showMessage("New record added successfully!");
@@ -573,7 +597,8 @@
 
             if (action === 'delete') {
                 try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'safety_signals', docId);
+                    // Delete document using private path
+                    const docRef = getPrivateDocumentRef(docId);
                     await deleteDoc(docRef);
                     showMessage("Record deleted successfully!");
                 } catch (e) {
@@ -627,8 +652,7 @@
                 return;
             }
             
-            // FIX: Enhanced filtering to remove lines that are empty or contain only delimiters (like ",,,,")
-            // This prevents those lines from being parsed into records with 5 empty strings.
+            // Enhanced filtering to remove lines that are empty or contain only delimiters (like ",,,,")
             const lines = rawData.split('\n').filter(line => line.trim().replace(/,/g, '').length > 0);
 
             // Use fixed headers since the text paste feature relies on a known order
@@ -642,6 +666,7 @@
                                     headers.every((h, i) => (firstLineValues[i] || "").toLowerCase().includes(h.slice(0, 3))); // Check for partial match like 'prod'
 
             const startLine = isHeaderPresent ? 1 : 0; 
+            const collectionRef = getPrivateCollectionRef();
 
             for (let i = startLine; i < lines.length; i++) {
                 const line = lines[i];
@@ -664,7 +689,8 @@
                 // Ensure all fields are present (not just undefined, but also not an empty string after trimming)
                 if (Object.values(record).every(v => v !== undefined && v.trim() !== '')) {
                     const newLog = [{ action: "Bulk Added", timestamp: new Date() }];
-                    recordsToUpload.push(addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'safety_signals'), { ...record, log: newLog }));
+                    // Add document using private path
+                    recordsToUpload.push(addDoc(collectionRef, { ...record, log: newLog }));
                 } else {
                     console.error(`Skipping malformed row ${i + 1}: Missing one or more required fields.`);
                     skippedRows++;
@@ -740,7 +766,7 @@
             } else {
                 bulkUploadTextBtn.disabled = true;
                 bulkUploadTextBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
-                bulkUploadTextBtn.classList.add('bg-blue-400', 'cursor-not-allowed');
+                bulkUploadFileBtn.classList.add('bg-blue-400', 'cursor-not-allowed');
             }
         });
         
@@ -777,13 +803,14 @@
             onAuthStateChanged(auth, async (user) => {
                 if (user) {
                     currentUserId = user.uid;
-                    userDisplay.textContent = `Authenticated as User ID: ${currentUserId}`;
+                    userDisplay.textContent = `Running in PRIVATE MODE. Your data (User ID: ${currentUserId}) is secure and separate.`;
                     setupFirestoreListener();
                 } else {
                     try {
                         if (initialAuthToken) {
                             await signInWithCustomToken(auth, initialAuthToken);
                         } else {
+                            // If no token, sign in anonymously to get a unique User ID
                             await signInAnonymously(auth);
                         }
                     } catch (error) {
