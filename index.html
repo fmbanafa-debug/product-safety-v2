@@ -176,14 +176,29 @@
 
         // Firebase configuration and app ID provided by the environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const rawFirebaseConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
+        let isFirebaseReady = false;
+        let app, db, auth;
         let currentUserId = null;
+
+        // --- SAFE FIREBASE INITIALIZATION ---
+        if (rawFirebaseConfig) {
+            try {
+                const firebaseConfig = JSON.parse(rawFirebaseConfig);
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                isFirebaseReady = true;
+            } catch (e) {
+                console.error("Firebase configuration is present but failed to initialize:", e);
+                // isFirebaseReady remains false
+            }
+        } else {
+            console.warn("Running in local/offline mode: Firebase configuration missing. Database features disabled.");
+        }
+
 
         // --- DOM ELEMENTS ---
         const dataTable = document.getElementById('data-table');
@@ -438,8 +453,8 @@
          * Sets up a real-time listener for the Firestore collection.
          */
         function setupFirestoreListener() {
-            if (!currentUserId) {
-                console.error("User not authenticated. Cannot set up Firestore listener.");
+            if (!currentUserId || !isFirebaseReady) {
+                console.error("Firebase not ready or user not authenticated. Cannot set up Firestore listener.");
                 return;
             }
 
@@ -471,6 +486,12 @@
         // Add a new record or update an existing one
         addRecordForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            if (!isFirebaseReady) {
+                showMessage("Database features are disabled in local/offline mode.", 'error');
+                return;
+            }
+
             const recordData = {
                 productName: document.getElementById('new-product').value,
                 activeSubstance: document.getElementById('new-substance').value,
@@ -513,6 +534,13 @@
             const action = e.target.dataset.action;
             const docId = e.target.dataset.docId;
 
+            if (!isFirebaseReady) {
+                 if (action === 'delete' || action === 'edit') {
+                    showMessage("Database features are disabled in local/offline mode.", 'error');
+                 }
+                return;
+            }
+
             if (action === 'delete') {
                 try {
                     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'safety_signals', docId);
@@ -534,7 +562,7 @@
         clearFiltersBtn.addEventListener('click', clearFilters);
         exportBtn.addEventListener('click', exportToCSV);
 
-        // Bulk upload functionality
+        // Bulk upload functionality: LISTENER MUST BE ATTACHED REGARDLESS OF FIREBASE STATE
         fileInput.addEventListener('change', () => {
             if (fileInput.files.length > 0) {
                 bulkUploadBtn.disabled = false;
@@ -568,6 +596,16 @@
         }
 
         bulkUploadBtn.addEventListener('click', async () => {
+            if (!isFirebaseReady) {
+                uploadStatus.textContent = 'Database features are disabled in local/offline mode.';
+                showMessage('Cannot bulk upload in local mode. Please use the hosted environment.', 'error');
+                bulkUploadBtn.disabled = false;
+                bulkUploadBtn.textContent = 'Upload';
+                bulkUploadBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                bulkUploadBtn.classList.add('bg-blue-400', 'cursor-not-allowed');
+                return;
+            }
+
             const file = fileInput.files[0];
             if (!file) {
                 showMessage("Please select a file to upload.", "error");
@@ -607,7 +645,6 @@
                     }
 
                     const record = {};
-                    let isValidRow = true;
                     headers.forEach((header, index) => {
                         const value = values[index];
                         if (header.includes('productname')) record.productName = value;
@@ -659,25 +696,31 @@
         cancelBtn.addEventListener('click', cancelEdit);
 
         // --- AUTHENTICATION & INITIALIZATION ---
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                currentUserId = user.uid;
-                userDisplay.textContent = `Authenticated as User ID: ${currentUserId}`;
-                setupFirestoreListener();
-            } else {
-                try {
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken);
-                    } else {
-                        await signInAnonymously(auth);
+        if (isFirebaseReady) {
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    currentUserId = user.uid;
+                    userDisplay.textContent = `Authenticated as User ID: ${currentUserId}`;
+                    setupFirestoreListener();
+                } else {
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Authentication failed: ", error);
+                        userDisplay.textContent = "Authentication failed.";
+                        showMessage("Authentication failed. Please check the console for details.", 'error');
                     }
-                } catch (error) {
-                    console.error("Authentication failed: ", error);
-                    userDisplay.textContent = "Authentication failed.";
-                    showMessage("Authentication failed. Please check the console for details.", 'error');
                 }
-            }
-        });
+            });
+        } else {
+            // Local Mode Fallback for the UI
+            userDisplay.textContent = `Running in LOCAL MODE. Database features disabled.`;
+            renderTable([]); // Show an empty table
+        }
         
     </script>
 </body>
