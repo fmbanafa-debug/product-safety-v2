@@ -40,8 +40,8 @@
     <div class="container mx-auto p-4 md:p-8">
         <header class="text-center mb-8">
             <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Product Safety Signal Browser</h1>
-            <p class="text-gray-600 mt-2">Filter, add, edit, or delete records from your **private** database.</p>
-            <div id="user-info" class="text-sm text-gray-500 mt-4">Loading user information...</div>
+            <p class="text-gray-600 mt-2">Filter, add, edit, or delete records from your **local browser storage**.</p>
+            <div id="user-info" class="text-sm text-gray-500 mt-4">Running in LOCAL MODE. Data is stored in this browser only.</div>
         </header>
 
         <!-- Message Box for user feedback -->
@@ -192,79 +192,25 @@
         </div>
     </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- HARDCODED FIREBASE CONFIGURATION FOR LOCAL TESTING ---
-        // WARNING: This exposes your API key in the client-side code.
-        // Use this only for trusted environments like your private GitHub repo.
-        const APP_ID = 'safety-signal-app-2025'; // A hardcoded App ID
-        const API_KEY = 'AIzaSyD9xRkAan0WhW8GTegveSaU5gaInCO4Yy0'; // Your provided key
-        const PROJECT_ID = 'your-firestore-project-id'; // You MUST replace this with your actual Firestore Project ID!
-        const MESSAGING_SENDER_ID = '123456789012'; // Placeholder, typically not critical for Firestore
-        const STORAGE_BUCKET = 'your-storage-bucket.appspot.com'; // Placeholder, typically not critical for Firestore
+    <script>
+        // --- LOCAL STORAGE KEY ---
+        const STORAGE_KEY = 'SAFETY_SIGNALS_DATA';
         
-        const LOCAL_FIREBASE_CONFIG = {
-            apiKey: API_KEY,
-            authDomain: `${PROJECT_ID}.firebaseapp.com`,
-            projectId: PROJECT_ID,
-            storageBucket: STORAGE_BUCKET,
-            messagingSenderId: MESSAGING_SENDER_ID,
-            appId: `1:${MESSAGING_SENDER_ID}:web:${Math.random().toString(36).substring(2, 10)}`, // Generate a unique App ID hash
-        };
-
-        // Firebase configuration and app ID are derived either from the hosted environment or the local config.
-        const appId = typeof __app_id !== 'undefined' ? __app_id : APP_ID;
-        const rawFirebaseConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : JSON.stringify(LOCAL_FIREBASE_CONFIG);
-        // We cannot securely generate a custom token locally, so we fall back to anonymous sign-in.
-        const initialAuthToken = null; 
+        let allRecords = [];
+        let sortColumn = null;
+        let sortDirection = 'asc';
         
-        let isFirebaseReady = false;
-        let app, db, auth;
-        let currentUserId = null;
-        // Define the base collection name for per-user data
-        const PRIVATE_COLLECTION_NAME = 'safety_signals';
-
-        // --- SAFE FIREBASE INITIALIZATION ---
-        if (rawFirebaseConfig) {
-            try {
-                const firebaseConfig = JSON.parse(rawFirebaseConfig);
-                
-                // IMPORTANT: If you are running this locally, you MUST set your actual Project ID above
-                if (firebaseConfig.projectId === 'your-firestore-project-id') {
-                     throw new Error("Local Mode Setup Warning: You must replace 'your-firestore-project-id' with your actual Firebase project ID to enable database features.");
-                }
-
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                isFirebaseReady = true;
-            } catch (e) {
-                console.error("Firebase initialization failed:", e.message || e);
-                // isFirebaseReady remains false
-            }
-        } else {
-            console.warn("Running in local/offline mode: Firebase configuration missing. Database features disabled.");
-        }
-
-
-        // --- DOM ELEMENTS ---
+        // --- DOM ELEMENTS (simplified) ---
         const dataTable = document.getElementById('data-table');
-        const userDisplay = document.getElementById('user-info');
         const addRecordForm = document.getElementById('add-record-form');
         const docIdInput = document.getElementById('doc-id');
         const addRecordBtn = document.getElementById('add-btn');
         const cancelBtn = document.getElementById('cancel-btn');
         const exportBtn = document.getElementById('export-btn');
-        // File Upload Elements
         const fileInput = document.getElementById('file-upload');
         const bulkUploadFileBtn = document.getElementById('bulk-upload-file-btn');
-        // Text Upload Elements
         const textInput = document.getElementById('text-upload');
         const bulkUploadTextBtn = document.getElementById('bulk-upload-text-btn');
-        
         const uploadStatus = document.getElementById('upload-status');
         const messageContainer = document.getElementById('message-container');
         const loadingSpinner = document.getElementById('loading-spinner');
@@ -280,31 +226,54 @@
         const filterInputs = document.querySelectorAll('#filters input[list]');
 
 
-        let allRecords = [];
-        let sortColumn = null;
-        let sortDirection = 'asc';
-
+        // --- LOCAL STORAGE CRUD FUNCTIONS ---
+        
         /**
-         * Utility function to get the correct collection reference (per-user private collection).
-         * Requires currentUserId to be set.
+         * Loads records from local storage.
+         * @returns {object[]} Array of records.
          */
-        function getPrivateCollectionRef() {
-            if (!currentUserId) {
-                throw new Error("User ID is not defined for private collection access.");
+        function loadData() {
+            try {
+                const storedData = localStorage.getItem(STORAGE_KEY);
+                return storedData ? JSON.parse(storedData) : [];
+            } catch (e) {
+                console.error("Error loading data from localStorage:", e);
+                return [];
             }
-            return collection(db, 'artifacts', appId, 'users', currentUserId, PRIVATE_COLLECTION_NAME);
         }
 
         /**
-         * Utility function to get the correct document reference (per-user private collection).
-         * Requires currentUserId and docId to be set.
+         * Saves the current allRecords array to local storage.
          */
-        function getPrivateDocumentRef(docId) {
-            if (!currentUserId) {
-                throw new Error("User ID is not defined for private document access.");
+        function saveData() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(allRecords));
+            } catch (e) {
+                console.error("Error saving data to localStorage:", e);
+                showMessage("Failed to save data locally.", 'error');
             }
-            return doc(db, 'artifacts', appId, 'users', currentUserId, PRIVATE_COLLECTION_NAME, docId);
         }
+        
+        /**
+         * Generates a simple unique ID.
+         * @returns {string} Unique ID.
+         */
+        function generateUniqueId() {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+        }
+
+        /**
+         * Helper function to update allRecords and trigger UI refresh.
+         */
+        function updateAllData() {
+            saveData();
+            
+            // Re-apply filters and sort with the new data
+            populateDatalists();
+            applyFilters();
+        }
+
+        // --- UI FUNCTIONS ---
 
         /**
          * Displays a temporary message box for user feedback.
@@ -351,8 +320,8 @@
                 return;
             }
             data.forEach(item => {
-                const logEntry = item.log && item.log.length > 0 ? item.log[item.log.length - 1] : null;
-                const logText = logEntry ? `${logEntry.action} on ${new Date(logEntry.timestamp.seconds * 1000).toLocaleString()}` : 'N/A';
+                // Log is now a simple string for localStorage version
+                const logText = item.log || 'N/A';
                 
                 const row = document.createElement('tr');
                 row.innerHTML = `
@@ -372,24 +341,37 @@
         }
 
         /**
-         * Populates a datalist with unique, sorted options from the data.
-         * @param {HTMLElement} datalistElement - The datalist element to populate.
-         * @param {string[]} options - An array of strings for the options.
+         * Populates all datalists with unique, sorted options from the current records.
          */
-        function populateDatalist(datalistElement, options) {
-            datalistElement.innerHTML = '';
-            const uniqueOptions = [...new Set(options)].sort();
-            uniqueOptions.forEach(optionText => {
-                if (optionText) {
+        function populateDatalists() {
+            const productList = document.getElementById('product-list');
+            const substanceList = document.getElementById('substance-list');
+            const signalList = document.getElementById('signal-list');
+            const categoryList = document.getElementById('category-list');
+            const outcomeList = document.getElementById('outcome-list');
+            
+            // Clear existing options
+            [productList, substanceList, signalList, categoryList, outcomeList].forEach(list => list.innerHTML = '');
+
+            // Helper to populate a single list
+            const populateList = (listElement, key) => {
+                const options = [...new Set(allRecords.map(item => item[key]).filter(Boolean))].sort();
+                options.forEach(optionText => {
                     const option = document.createElement('option');
                     option.value = optionText;
-                    datalistElement.appendChild(option);
-                }
-            });
+                    listElement.appendChild(option);
+                });
+            };
+
+            populateList(productList, 'productName');
+            populateList(substanceList, 'activeSubstance');
+            populateList(signalList, 'signal');
+            populateList(categoryList, 'category');
+            populateList(outcomeList, 'outcome');
         }
         
         /**
-         * Filters the table data based on the selected dropdown values.
+         * Filters the table data based on the selected input values.
          */
         function applyFilters() {
             const selectedProduct = filters.product.value.toLowerCase();
@@ -413,20 +395,6 @@
         }
 
         /**
-         * Sorts the records by a given column.
-         * @param {string} column - The column to sort by.
-         */
-        function handleSort(column) {
-            if (sortColumn === column) {
-                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-            } else {
-                sortColumn = column;
-                sortDirection = 'asc';
-            }
-            applyFilters();
-        }
-
-        /**
          * Sorts an array of records based on the current sortColumn and sortDirection.
          * @param {object[]} records - The array of records to sort.
          */
@@ -434,52 +402,13 @@
             if (!sortColumn) return;
             
             records.sort((a, b) => {
-                let aValue, bValue;
-
-                if (sortColumn === 'log') {
-                    const aLogEntry = a.log && a.log.length > 0 ? a.log[a.log.length - 1] : null;
-                    const bLogEntry = b.log && b.log.length > 0 ? b.log[b.log.length - 1] : null;
-                    aValue = aLogEntry ? aLogEntry.timestamp.seconds : 0;
-                    bValue = bLogEntry ? bLogEntry.timestamp.seconds : 0;
-                } else {
-                    aValue = a[sortColumn];
-                    bValue = b[sortColumn];
-                }
+                let aValue = a[sortColumn];
+                let bValue = b[sortColumn];
 
                 if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
                 if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
                 return 0;
             });
-        }
-
-        /**
-         * Resets all filters to their default state.
-         */
-        function clearFilters() {
-            Object.values(filters).forEach(input => input.value = "");
-            applyFilters();
-        }
-
-        /**
-         * Starts the edit process for a record.
-         * @param {string} docId - The ID of the document to edit.
-         */
-        function startEditRecord(docId) {
-            const recordToEdit = allRecords.find(record => record.id === docId);
-            if (!recordToEdit) {
-                showMessage("Record not found for editing.", 'error');
-                return;
-            }
-
-            docIdInput.value = recordToEdit.id;
-            document.getElementById('new-product').value = recordToEdit.productName;
-            document.getElementById('new-substance').value = recordToEdit.activeSubstance;
-            document.getElementById('new-signal').value = recordToEdit.signal;
-            document.getElementById('new-category').value = recordToEdit.category;
-            document.getElementById('new-outcome').value = recordToEdit.outcome;
-
-            addRecordBtn.textContent = 'Update Record';
-            cancelBtn.classList.remove('hidden');
         }
 
         /**
@@ -492,23 +421,109 @@
             cancelBtn.classList.add('hidden');
         }
 
-        /**
-         * Exports the current records to a CSV file.
-         */
-        function exportToCSV() {
+        // --- EVENT HANDLERS ---
+
+        // Add a new record or update an existing one
+        addRecordForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            const now = new Date().toLocaleString();
+            const recordData = {
+                productName: document.getElementById('new-product').value,
+                activeSubstance: document.getElementById('new-substance').value,
+                signal: document.getElementById('new-signal').value,
+                category: document.getElementById('new-category').value,
+                outcome: document.getElementById('new-outcome').value,
+            };
+
+            // Set button state
+            addRecordBtn.disabled = true;
+            addRecordBtn.textContent = 'Processing...';
+            
+            try {
+                if (docIdInput.value) {
+                    // Update existing record
+                    const docId = docIdInput.value;
+                    const index = allRecords.findIndex(r => r.id === docId);
+                    
+                    if (index !== -1) {
+                        allRecords[index] = { 
+                            ...recordData, 
+                            id: docId, 
+                            log: `Updated on ${now}`
+                        };
+                        showMessage("Record updated successfully!");
+                    }
+                } else {
+                    // Add new record
+                    allRecords.push({
+                        ...recordData,
+                        id: generateUniqueId(),
+                        log: `Added on ${now}`
+                    });
+                    showMessage("New record added successfully!");
+                }
+                
+                updateAllData();
+                cancelEdit(); // Reset form regardless of add/update
+            } catch (e) {
+                console.error("Error adding/updating document: ", e);
+                showMessage("Failed to process record. Please try again.", 'error');
+            } finally {
+                addRecordBtn.disabled = false;
+                addRecordBtn.textContent = docIdInput.value ? 'Update Record' : 'Add Record';
+            }
+        });
+
+        // Event delegation for Edit and Delete buttons
+        dataTable.addEventListener('click', (e) => {
+            const action = e.target.dataset.action;
+            const docId = e.target.dataset.docId;
+
+            if (action === 'delete') {
+                if (confirm('Are you sure you want to delete this record?')) {
+                    allRecords = allRecords.filter(r => r.id !== docId);
+                    updateAllData();
+                    showMessage("Record deleted successfully!");
+                }
+            } else if (action === 'edit') {
+                const recordToEdit = allRecords.find(record => record.id === docId);
+                if (recordToEdit) {
+                    docIdInput.value = recordToEdit.id;
+                    document.getElementById('new-product').value = recordToEdit.productName;
+                    document.getElementById('new-substance').value = recordToEdit.activeSubstance;
+                    document.getElementById('new-signal').value = recordToEdit.signal;
+                    document.getElementById('new-category').value = recordToEdit.category;
+                    document.getElementById('new-outcome').value = recordToEdit.outcome;
+
+                    addRecordBtn.textContent = 'Update Record';
+                    cancelBtn.classList.remove('hidden');
+                }
+            }
+        });
+        
+        // Event listeners for filters and clear button
+        filterInputs.forEach(input => {
+            input.addEventListener('input', applyFilters);
+        });
+
+        clearFiltersBtn.addEventListener('click', () => {
+            Object.values(filters).forEach(input => input.value = "");
+            applyFilters();
+        });
+
+        exportBtn.addEventListener('click', () => {
             const headers = ["Product Name", "Active Substance", "Potential Safety Signal", "Category", "Outcome", "Log"];
             const csvRows = [headers.join(',')];
 
             allRecords.forEach(item => {
-                const logEntry = item.log && item.log.length > 0 ? item.log[item.log.length - 1] : { action: "N/A", timestamp: { seconds: 0 }};
-                const logText = `"${logEntry.action} on ${new Date(logEntry.timestamp.seconds * 1000).toLocaleString()}"`;
                 const row = [
                     `"${item.productName}"`,
                     `"${item.activeSubstance}"`,
                     `"${item.signal}"`,
                     `"${item.category}"`,
                     `"${item.outcome}"`,
-                    logText
+                    `"${item.log}"` // Use the simplified log string
                 ];
                 csvRows.push(row.join(','));
             });
@@ -524,126 +539,10 @@
             link.click();
             document.body.removeChild(link);
             showMessage("Records exported successfully!");
-        }
-        
-        /**
-         * Sets up a real-time listener for the Firestore collection.
-         */
-        function setupFirestoreListener() {
-            if (!currentUserId || !isFirebaseReady) {
-                console.error("Firebase not ready or user not authenticated. Cannot set up Firestore listener.");
-                return;
-            }
-
-            // --- CHANGED to use private per-user collection ---
-            const collectionRef = getPrivateCollectionRef();
-            
-            loadingSpinner.classList.remove('hidden');
-
-            // Listen for real-time updates
-            onSnapshot(collectionRef, (snapshot) => {
-                allRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-                // Update datalists with fresh data
-                populateDatalist(document.getElementById('product-list'), allRecords.map(item => item.productName));
-                populateDatalist(document.getElementById('substance-list'), allRecords.map(item => item.activeSubstance));
-                populateDatalist(document.getElementById('signal-list'), allRecords.map(item => item.signal));
-                populateDatalist(document.getElementById('category-list'), allRecords.map(item => item.category));
-                populateDatalist(document.getElementById('outcome-list'), allRecords.map(item => item.outcome));
-
-                // Re-apply filters and sort with the new data
-                applyFilters();
-                loadingSpinner.classList.add('hidden');
-            }, (error) => {
-                console.error("Error fetching documents: ", error);
-                showMessage("Failed to load records. Please try again later.", 'error');
-                loadingSpinner.classList.add('hidden');
-            });
-        }
-
-        // Add a new record or update an existing one
-        addRecordForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            if (!isFirebaseReady) {
-                showMessage("Database features are disabled in local/offline mode. (Form cleared for UI testing)", 'error');
-                cancelEdit();
-                return;
-            }
-
-            const recordData = {
-                productName: document.getElementById('new-product').value,
-                activeSubstance: document.getElementById('new-substance').value,
-                signal: document.getElementById('new-signal').value,
-                category: document.getElementById('new-category').value,
-                outcome: document.getElementById('new-outcome').value,
-            };
-
-            addRecordBtn.disabled = true;
-            addRecordBtn.textContent = 'Processing...';
-            
-            try {
-                if (docIdInput.value) {
-                    // Update existing record using private path
-                    const docRef = getPrivateDocumentRef(docIdInput.value);
-                    const existingRecord = allRecords.find(r => r.id === docIdInput.value);
-                    const newLog = existingRecord.log || [];
-                    newLog.push({ action: "Updated", timestamp: new Date() });
-                    await updateDoc(docRef, { ...recordData, log: newLog });
-                    showMessage("Record updated successfully!");
-                } else {
-                    // Add new record using private path
-                    const collectionRef = getPrivateCollectionRef();
-                    const newLog = [{ action: "Added", timestamp: new Date() }];
-                    await addDoc(collectionRef, { ...recordData, log: newLog });
-                    showMessage("New record added successfully!");
-                }
-                cancelEdit(); // Reset form regardless of add/update
-            } catch (e) {
-                console.error("Error adding/updating document: ", e);
-                showMessage("Failed to process record. Please try again.", 'error');
-            } finally {
-                addRecordBtn.disabled = false;
-                addRecordBtn.textContent = docIdInput.value ? 'Update Record' : 'Add Record';
-            }
         });
 
-        // Event delegation for Edit and Delete buttons
-        dataTable.addEventListener('click', async (e) => {
-            const action = e.target.dataset.action;
-            const docId = e.target.dataset.docId;
 
-            if (!isFirebaseReady) {
-                 if (action === 'delete' || action === 'edit') {
-                    showMessage("Database features are disabled in local/offline mode.", 'error');
-                 }
-                return;
-            }
-
-            if (action === 'delete') {
-                try {
-                    // Delete document using private path
-                    const docRef = getPrivateDocumentRef(docId);
-                    await deleteDoc(docRef);
-                    showMessage("Record deleted successfully!");
-                } catch (e) {
-                    console.error("Error deleting document: ", e);
-                    showMessage("Failed to delete record. Please try again.", 'error');
-                }
-            } else if (action === 'edit') {
-                startEditRecord(docId);
-            }
-        });
-        
-        // Event listeners for filters and clear button
-        filterInputs.forEach(input => {
-            input.addEventListener('input', applyFilters);
-        });
-        clearFiltersBtn.addEventListener('click', clearFilters);
-        exportBtn.addEventListener('click', exportToCSV);
-
-
-        // --- BULK UPLOAD CORE LOGIC ---
+        // --- BULK UPLOAD CORE LOGIC (Modified for LocalStorage) ---
 
         // A helper function to parse CSV lines, correctly handling commas inside quotes.
         function parseCsvLine(line) {
@@ -670,29 +569,23 @@
          * Generic function to process records from text (either CSV file content or pasted text).
          * @param {string} rawData - The raw CSV/text content.
          */
-        async function processBulkRecords(rawData) {
-            if (!isFirebaseReady) {
-                // FIX: Update status text to be more explicit about being disabled.
-                uploadStatus.textContent = 'Bulk upload is disabled in local/offline mode.';
-                showMessage('Cannot bulk upload in local mode. Please use the hosted environment.', 'error');
-                return;
-            }
+        function processBulkRecords(rawData) {
+            const now = new Date().toLocaleString();
             
             // Enhanced filtering to remove lines that are empty or contain only delimiters (like ",,,,")
             const lines = rawData.split('\n').filter(line => line.trim().replace(/,/g, '').length > 0);
 
-            // Use fixed headers since the text paste feature relies on a known order
             const headers = ["productname", "activesubstance", "signal", "category", "outcome"]; 
-            const recordsToUpload = [];
+            let processedRecords = 0;
             let skippedRows = 0;
             
-            // Check if the first line looks like a header (contains required fields)
+            // Check if the first line looks like a header 
             const firstLineValues = parseCsvLine(lines[0] || "");
             const isHeaderPresent = firstLineValues.length === headers.length && 
-                                    headers.every((h, i) => (firstLineValues[i] || "").toLowerCase().includes(h.slice(0, 3))); // Check for partial match like 'prod'
+                                    headers.every((h, i) => (firstLineValues[i] || "").toLowerCase().includes(h.slice(0, 3)));
 
             const startLine = isHeaderPresent ? 1 : 0; 
-            const collectionRef = getPrivateCollectionRef();
+            const newRecords = [];
 
             for (let i = startLine; i < lines.length; i++) {
                 const line = lines[i];
@@ -712,30 +605,28 @@
                     outcome: values[4],
                 };
                 
-                // Ensure all fields are present (not just undefined, but also not an empty string after trimming)
+                // Ensure all fields are present
                 if (Object.values(record).every(v => v !== undefined && v.trim() !== '')) {
-                    const newLog = [{ action: "Bulk Added", timestamp: new Date() }];
-                    // Add document using private path
-                    recordsToUpload.push(addDoc(collectionRef, { ...record, log: newLog }));
+                    newRecords.push({ 
+                        ...record, 
+                        id: generateUniqueId(),
+                        log: `Bulk Added on ${now}`
+                    });
+                    processedRecords++;
                 } else {
                     console.error(`Skipping malformed row ${i + 1}: Missing one or more required fields.`);
                     skippedRows++;
                 }
             }
 
-            uploadStatus.textContent = `Uploading ${recordsToUpload.length} records...`;
-            try {
-                await Promise.all(recordsToUpload);
-                const statusMessage = `Successfully uploaded ${recordsToUpload.length} records. Skipped ${skippedRows} malformed rows.`;
-                uploadStatus.textContent = statusMessage;
-                showMessage(statusMessage, "success");
-                return true;
-            } catch (error) {
-                console.error("Bulk upload failed: ", error);
-                uploadStatus.textContent = "Upload failed. Check console for details.";
-                showMessage("Bulk upload failed. Please try again.", "error");
-                return false;
-            }
+            // Update global state and save to local storage
+            allRecords.push(...newRecords);
+            updateAllData();
+
+            const statusMessage = `Successfully processed ${processedRecords} records. Skipped ${skippedRows} malformed rows.`;
+            uploadStatus.textContent = statusMessage;
+            showMessage(statusMessage, "success");
+            return true;
         }
 
 
@@ -757,15 +648,7 @@
             }
         });
         
-        bulkUploadFileBtn.addEventListener('click', async () => {
-            if (!isFirebaseReady) {
-                uploadStatus.textContent = 'Bulk upload is disabled in local/offline mode.';
-                showMessage('Cannot bulk upload in local mode. Please use the hosted environment.', 'error');
-                // We still want the file input to clear, but we prevent reading the file if we can't save it.
-                fileInput.value = '';
-                return;
-            }
-
+        bulkUploadFileBtn.addEventListener('click', () => {
             const file = fileInput.files[0];
             if (!file) return;
 
@@ -773,8 +656,8 @@
             bulkUploadFileBtn.textContent = 'Processing...';
 
             const reader = new FileReader();
-            reader.onload = async (event) => {
-                const success = await processBulkRecords(event.target.result);
+            reader.onload = (event) => {
+                const success = processBulkRecords(event.target.result);
                 if (success) {
                     fileInput.value = ''; // Clear file input
                 }
@@ -800,29 +683,18 @@
             } else {
                 bulkUploadTextBtn.disabled = true;
                 bulkUploadTextBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
-                bulkUploadFileBtn.classList.add('bg-blue-400', 'cursor-not-allowed');
+                bulkUploadTextBtn.classList.add('bg-blue-400', 'cursor-not-allowed');
             }
         });
         
-        bulkUploadTextBtn.addEventListener('click', async () => {
-            if (!isFirebaseReady) {
-                uploadStatus.textContent = 'Bulk upload is disabled in local/offline mode.';
-                showMessage('Cannot bulk upload in local mode. Please use the hosted environment.', 'error');
-                // Clear the text input to simulate processing without actually saving
-                textInput.value = '';
-                bulkUploadTextBtn.disabled = true;
-                bulkUploadTextBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
-                bulkUploadTextBtn.classList.add('bg-blue-400', 'cursor-not-allowed');
-                return;
-            }
-            
+        bulkUploadTextBtn.addEventListener('click', () => {
             const textData = textInput.value.trim();
             if (textData.length === 0) return;
 
             bulkUploadTextBtn.disabled = true;
             bulkUploadTextBtn.textContent = 'Processing...';
 
-            const success = await processBulkRecords(textData);
+            const success = processBulkRecords(textData);
             if (success) {
                 textInput.value = ''; // Clear text area
             }
@@ -843,30 +715,19 @@
         // Event listener for cancel button
         cancelBtn.addEventListener('click', cancelEdit);
 
-        // --- AUTHENTICATION & INITIALIZATION ---
-        if (isFirebaseReady) {
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    currentUserId = user.uid;
-                    userDisplay.textContent = `Running in PRIVATE MODE. Your data (User ID: ${currentUserId}) is secure and separate.`;
-                    setupFirestoreListener();
-                } else {
-                    try {
-                        // In local mode, we sign in anonymously since we don't have the custom token.
-                        await signInAnonymously(auth);
-                    } catch (error) {
-                        console.error("Authentication failed: ", error);
-                        userDisplay.textContent = "Authentication failed.";
-                        showMessage("Authentication failed. Please check the console for details.", 'error');
-                    }
-                }
-            });
-        } else {
-            // Local Mode Fallback for the UI
-            userDisplay.textContent = `Running in LOCAL MODE. Database features disabled.`;
-            renderTable([]); // Show an empty table
+
+        // --- INITIALIZATION ---
+        window.onload = () => {
+            // Load data and refresh UI when the page loads
+            allRecords = loadData();
+            updateAllData();
+            loadingSpinner.classList.add('hidden');
+        };
+
+        // Confirm replacement for window.confirm()
+        function confirm(message) {
+            return window.prompt(`Type 'YES' to confirm: ${message}`) === 'YES';
         }
-        
     </script>
 </body>
 </html>
