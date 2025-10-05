@@ -516,7 +516,9 @@
             e.preventDefault();
 
             if (!isFirebaseReady) {
-                showMessage("Database features are disabled in local/offline mode.", 'error');
+                // FIX: Clear the form to visually indicate "processing" happened, even if save is blocked.
+                showMessage("Database features are disabled in local/offline mode. (Form cleared for UI testing)", 'error');
+                cancelEdit();
                 return;
             }
 
@@ -625,14 +627,21 @@
                 return;
             }
             
-            const lines = rawData.split('\n').filter(line => line.trim() !== '');
+            // FIX: Enhanced filtering to remove lines that are empty or contain only delimiters (like ",,,,")
+            // This prevents those lines from being parsed into records with 5 empty strings.
+            const lines = rawData.split('\n').filter(line => line.trim().replace(/,/g, '').length > 0);
 
             // Use fixed headers since the text paste feature relies on a known order
-            // For file upload, we still derive headers, but for pasted text, we rely on the user following the prompt order.
             const headers = ["productname", "activesubstance", "signal", "category", "outcome"]; 
             const recordsToUpload = [];
             let skippedRows = 0;
-            const startLine = lines.length > 0 && (lines[0].toLowerCase().includes("productname") || lines[0].toLowerCase().includes("product name")) ? 1 : 0; // Skip header line if present
+            
+            // Check if the first line looks like a header (contains required fields)
+            const firstLineValues = parseCsvLine(lines[0] || "");
+            const isHeaderPresent = firstLineValues.length === headers.length && 
+                                    headers.every((h, i) => (firstLineValues[i] || "").toLowerCase().includes(h.slice(0, 3))); // Check for partial match like 'prod'
+
+            const startLine = isHeaderPresent ? 1 : 0; 
 
             for (let i = startLine; i < lines.length; i++) {
                 const line = lines[i];
@@ -652,6 +661,7 @@
                     outcome: values[4],
                 };
                 
+                // Ensure all fields are present (not just undefined, but also not an empty string after trimming)
                 if (Object.values(record).every(v => v !== undefined && v.trim() !== '')) {
                     const newLog = [{ action: "Bulk Added", timestamp: new Date() }];
                     recordsToUpload.push(addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'safety_signals'), { ...record, log: newLog }));
